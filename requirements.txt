@@ -1,4 +1,5 @@
-Flask
-flask-cors
-requests
-python-dotenv
+Flask==3.1.2
+flask-cors==6.0.1
+requests==2.32.5
+python-dotenv==1.1.1
+gunicorn==21.2.0
