@@ -74,8 +74,8 @@ def search_wikipedia_and_summarize(query, api_key):
             context_text += f"--- TITLE: {title} ---\n{extract}\n\n"
             sources.append({"title": f"Wikipedia: {title}", "uri": page_url})
 
-        # Synthesize with Gemini
-        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent"
+        # Synthesize with Gemini (Stable Model)
+        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
         prompt = f"Using ONLY this Wikipedia context, answer: '{query}'.\nCONTEXT:\n{context_text}"
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         resp = requests.post(gemini_url, headers={"Content-Type": "application/json"}, params={"key": api_key}, json=payload)
@@ -157,7 +157,7 @@ def ask_ai():
 
     try:
         if use_web_search:
-            # --- LAYER 1: Gemini Deep Search ---
+            # --- LAYER 1: Gemini Deep Search (Stable Model) ---
             system_instruction = base_persona + context_injection + """
             \n\n🌍 **WEB SEARCH MODE: ACTIVE**
             1. ROLE: Deep-dive research assistant.
@@ -171,7 +171,8 @@ def ask_ai():
                 "tools": [{"google_search": {}}]
             }
             
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent"
+            # FIXED: Using stable model 'gemini-1.5-flash' instead of preview
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
             resp = requests.post(url, headers={"Content-Type": "application/json"}, params={"key": gemini_api_key}, json=payload)
             resp.raise_for_status()
             result = resp.json()
@@ -190,16 +191,17 @@ def ask_ai():
                  
                  return jsonify({"answer": answer, "sources": unique_sources})
             else:
-                raise Exception("Gemini Search failed")
+                raise Exception("Gemini Search failed or returned no candidates")
 
         else:
-            # --- LAYER 0: Memory Mode ---
+            # --- LAYER 0: Memory Mode (Stable Model) ---
             system_instruction = base_persona + context_injection + "\n\n🧠 **MEMORY MODE: ACTIVE**\nAnswer from internal knowledge. Be creative!"
             payload = {
                 "contents": gemini_contents,
                 "systemInstruction": {"parts": [{"text": system_instruction}]}
             }
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent"
+            # FIXED: Using stable model 'gemini-1.5-flash' instead of preview
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
             resp = requests.post(url, headers={"Content-Type": "application/json"}, params={"key": gemini_api_key}, json=payload)
             resp.raise_for_status()
             answer = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -207,6 +209,7 @@ def ask_ai():
 
     except Exception as e:
         print(f"Primary Search Failed: {e}")
+        error_msg = str(e) # Capture specific error for client
         
         # --- LAYER 2: Wikipedia Fallback ---
         if use_web_search:
@@ -223,7 +226,8 @@ def ask_ai():
                 
             return jsonify({"answer": "I tried searching Google, Wikipedia, and DuckDuckGo, but couldn't find a direct answer. Could you try rephrasing?", "sources": []})
         else:
-            return jsonify({"answer": "I encountered a connection issue. Please try again.", "sources": []})
+            # FIXED: Returns specific error details instead of generic message
+            return jsonify({"answer": f"I encountered a connection issue. Error details: {error_msg}. Please check your API Key or usage limits.", "sources": []})
 
 @app.route("/generate-title", methods=["POST"])
 def generate_title():
@@ -232,7 +236,8 @@ def generate_title():
     key = os.getenv("GEMINI_API_KEY")
     if not prompt or not key: return jsonify({"title": "New Chat"})
     try:
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent"
+        # FIXED: Using stable model 'gemini-1.5-flash' instead of preview
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
         payload = {"contents": [{"parts": [{"text": f"Summarize this into a short 3-4 word title: {prompt}"}]}]}
         resp = requests.post(url, params={"key": key}, json=payload)
         title = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip().replace('"', '')
@@ -243,7 +248,7 @@ def generate_title():
     # ---- ROOT ROUTE ----
 @app.route("/")
 def home():
-    return "🚀 Lumina Backend is LIVE!"
+    return "🚀 Lumina Backend is LIVE! (Version: Stable Model Fixed)"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
