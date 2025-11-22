@@ -5,7 +5,6 @@ import requests
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 import re
-import json
 
 load_dotenv()
 
@@ -42,9 +41,7 @@ def crawl_specific_url(url):
         # Context Compression: Limit to ~8000 chars
         return text[:8000]
     except Exception as e:
-        # Log internally, return short msg
-        print(f"Crawl error: {e}")
-        return "Could not access content."
+        return f"Error crawling {url}: {str(e)}"
 
 def extract_url(text):
     match = re.search(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
@@ -77,15 +74,12 @@ def search_wikipedia_and_summarize(query, api_key):
             context_text += f"--- TITLE: {title} ---\n{extract}\n\n"
             sources.append({"title": f"Wikipedia: {title}", "uri": page_url})
 
-        # Synthesize with Gemini (Stable Model)
-        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        # Synthesize with Gemini
+        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent"
         prompt = f"Using ONLY this Wikipedia context, answer: '{query}'.\nCONTEXT:\n{context_text}"
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         resp = requests.post(gemini_url, headers={"Content-Type": "application/json"}, params={"key": api_key}, json=payload)
         
-        if resp.status_code != 200:
-             return None, []
-
         answer = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
         return answer, sources
 
@@ -159,18 +153,11 @@ def ask_ai():
         crawled_text = crawl_specific_url(found_url)
         context_injection = f"\n\n📄 **CONTEXT FROM LINK ({found_url}):**\n{crawled_text}\n\n(User asked about this link.)"
 
-    # --- FIX 400 ERROR: Clean History ---
-    # Remove empty messages and ensure correct structure
-    valid_history = []
-    for item in history:
-        content_text = item.get("content", "").strip()
-        if content_text: # Only add non-empty messages
-            role = "model" if item["role"] == "assistant" else "user"
-            valid_history.append({"role": role, "parts": [{"text": content_text}]})
+    gemini_contents = [{"role": "model" if item["role"] == "assistant" else "user", "parts": [{"text": item["content"]}]} for item in history]
 
     try:
         if use_web_search:
-            # --- LAYER 1: Gemini Deep Search (Stable Model) ---
+            # --- LAYER 1: Gemini Deep Search ---
             system_instruction = base_persona + context_injection + """
             \n\n🌍 **WEB SEARCH MODE: ACTIVE**
             1. ROLE: Deep-dive research assistant.
@@ -179,21 +166,14 @@ def ask_ai():
             """
             
             payload = {
-                "contents": valid_history, # Use cleaned history
+                "contents": gemini_contents,
                 "systemInstruction": {"parts": [{"text": system_instruction}]},
                 "tools": [{"google_search": {}}]
             }
             
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-            
-            # Request with Error Handling
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent"
             resp = requests.post(url, headers={"Content-Type": "application/json"}, params={"key": gemini_api_key}, json=payload)
-            
-            # Check specific status codes safely
-            if resp.status_code != 200:
-                print(f"Gemini API Error: {resp.status_code} - {resp.text}") # Log internally
-                raise Exception(f"Provider returned status {resp.status_code}")
-
+            resp.raise_for_status()
             result = resp.json()
             
             if "candidates" in result and result["candidates"][0].get("finishReason") != "RECITATION":
@@ -210,36 +190,32 @@ def ask_ai():
                  
                  return jsonify({"answer": answer, "sources": unique_sources})
             else:
-                raise Exception("Search returned no candidates")
+                raise Exception("Gemini Search failed")
 
         else:
-            # --- LAYER 0: Memory Mode (Stable Model) ---
+            # --- LAYER 0: Memory Mode ---
             system_instruction = base_persona + context_injection + "\n\n🧠 **MEMORY MODE: ACTIVE**\nAnswer from internal knowledge. Be creative!"
             payload = {
-                "contents": valid_history, # Use cleaned history
+                "contents": gemini_contents,
                 "systemInstruction": {"parts": [{"text": system_instruction}]}
             }
-            
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent"
             resp = requests.post(url, headers={"Content-Type": "application/json"}, params={"key": gemini_api_key}, json=payload)
-            
-            if resp.status_code != 200:
-                print(f"Gemini API Error: {resp.status_code} - {resp.text}") # Log internally
-                raise Exception(f"Provider returned status {resp.status_code}")
-
+            resp.raise_for_status()
             answer = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
             return jsonify({"answer": answer, "sources": []})
 
     except Exception as e:
-        print(f"Primary Search Failed: {str(e)}") # Log full error to console ONLY
+        print(f"Primary Search Failed: {e}")
         
-        # Fallbacks (safe to run)
+        # --- LAYER 2: Wikipedia Fallback ---
         if use_web_search:
             print("Attempting Wikipedia Fallback...")
             wiki_ans, wiki_src = search_wikipedia_and_summarize(last_user_msg, gemini_api_key)
             if wiki_ans:
                 return jsonify({"answer": wiki_ans, "sources": wiki_src})
             
+            # --- LAYER 3: DuckDuckGo Fallback ---
             print("Attempting DuckDuckGo Fallback...")
             ddg_ans, ddg_src = duckduckgo_search(last_user_msg)
             if ddg_ans:
@@ -247,8 +223,7 @@ def ask_ai():
                 
             return jsonify({"answer": "I tried searching Google, Wikipedia, and DuckDuckGo, but couldn't find a direct answer. Could you try rephrasing?", "sources": []})
         else:
-            # SANITIZED ERROR MESSAGE FOR FRONTEND
-            return jsonify({"answer": "I encountered a connection issue with the AI provider. Please try again in a moment.", "sources": []})
+            return jsonify({"answer": "I encountered a connection issue. Please try again.", "sources": []})
 
 @app.route("/generate-title", methods=["POST"])
 def generate_title():
@@ -257,19 +232,13 @@ def generate_title():
     key = os.getenv("GEMINI_API_KEY")
     if not prompt or not key: return jsonify({"title": "New Chat"})
     try:
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent"
         payload = {"contents": [{"parts": [{"text": f"Summarize this into a short 3-4 word title: {prompt}"}]}]}
         resp = requests.post(url, params={"key": key}, json=payload)
-        if resp.status_code == 200:
-            title = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip().replace('"', '')
-            return jsonify({"title": title})
-        return jsonify({"title": "New Chat"})
+        title = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip().replace('"', '')
+        return jsonify({"title": title})
     except:
         return jsonify({"title": "New Chat"})
-    
-@app.route("/")
-def home():
-    return "🚀 Lumina Backend is LIVE! (Security Patch Applied)"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
