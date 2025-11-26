@@ -80,8 +80,8 @@ def search_wikipedia_and_summarize(query, api_key):
             sources.append({"title": f"Wikipedia: {title}", "uri": page_url})
 
         # Synthesize with Gemini
-        # FIXED: Using standard model name
-        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        # UPGRADED: Using gemini-2.5-flash
+        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
         prompt = f"Using ONLY this Wikipedia context, answer: '{query}'.\nCONTEXT:\n{context_text}"
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         resp = requests.post(gemini_url, headers={"Content-Type": "application/json"}, params={"key": api_key}, json=payload)
@@ -177,8 +177,8 @@ def ask_ai():
                 "tools": [{"google_search": {}}]
             }
             
-            # FIXED: Using standard model name (gemini-1.5-flash) to prevent 400 Bad Request
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+            # UPGRADED: Using gemini-2.5-flash
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
             resp = requests.post(url, headers={"Content-Type": "application/json"}, params={"key": gemini_api_key}, json=payload)
             resp.raise_for_status()
             result = resp.json()
@@ -206,8 +206,8 @@ def ask_ai():
                 "contents": gemini_contents,
                 "systemInstruction": {"parts": [{"text": system_instruction}]}
             }
-            # FIXED: Using standard model name
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+            # UPGRADED: Using gemini-2.5-flash
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
             resp = requests.post(url, headers={"Content-Type": "application/json"}, params={"key": gemini_api_key}, json=payload)
             resp.raise_for_status()
             answer = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -240,8 +240,8 @@ def generate_title():
     key = os.getenv("GEMINI_API_KEY")
     if not prompt or not key: return jsonify({"title": "New Chat"})
     try:
-        # FIXED: Using standard model name
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        # UPGRADED: Using gemini-2.5-flash
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
         payload = {"contents": [{"parts": [{"text": f"Summarize this into a short 3-4 word title: {prompt}"}]}]}
         resp = requests.post(url, params={"key": key}, json=payload)
         title = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip().replace('"', '')
