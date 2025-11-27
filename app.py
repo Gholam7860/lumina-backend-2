@@ -5,16 +5,12 @@ import requests
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 import re
+import json
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
-
-# --- Health Check Endpoint ---
-@app.route("/", methods=["GET"])
-def health_check():
-    return "Lumina Backend is Running! 🚀", 200
 
 @app.route("/config", methods=["GET"])
 def get_config():
@@ -30,7 +26,7 @@ def get_config():
     except KeyError as e:
         return jsonify({"error": f"Missing env var: {e}"}), 500
 
-# --- Crawler & Compression ---
+# --- Crawler & Compression Components ---
 def crawl_specific_url(url):
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -38,13 +34,17 @@ def crawl_specific_url(url):
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         
+        # Noise Removal
         for script in soup(["script", "style", "nav", "footer", "header", "aside"]):
             script.decompose()
             
         text = soup.get_text(separator=' ', strip=True)
+        # Context Compression: Limit to ~8000 chars
         return text[:8000]
     except Exception as e:
-        return f"Error crawling {url}: {str(e)}"
+        # Log internally, return short msg
+        print(f"Crawl error: {e}")
+        return "Could not access content."
 
 def extract_url(text):
     match = re.search(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
@@ -52,13 +52,17 @@ def extract_url(text):
 
 # --- Fallback 1: Wikipedia ---
 def search_wikipedia_and_summarize(query, api_key):
+    """Fallback crawler using Wikipedia API."""
     try:
         search_url = "https://en.wikipedia.org/w/api.php"
-        search_params = {"action": "query", "list": "search", "srsearch": query, "format": "json", "srlimit": 3}
+        search_params = {
+            "action": "query", "list": "search", "srsearch": query, "format": "json", "srlimit": 3
+        }
         search_resp = requests.get(search_url, params=search_params).json()
         search_results = search_resp.get("query", {}).get("search", [])
 
-        if not search_results: return None, []
+        if not search_results:
+            return None, []
 
         context_text = "Here is information gathered from Wikipedia:\n\n"
         sources = []
@@ -73,22 +77,33 @@ def search_wikipedia_and_summarize(query, api_key):
             context_text += f"--- TITLE: {title} ---\n{extract}\n\n"
             sources.append({"title": f"Wikipedia: {title}", "uri": page_url})
 
-        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        # Synthesize with Gemini (Stable Model)
+        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
         prompt = f"Using ONLY this Wikipedia context, answer: '{query}'.\nCONTEXT:\n{context_text}"
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         resp = requests.post(gemini_url, headers={"Content-Type": "application/json"}, params={"key": api_key}, json=payload)
         
+        if resp.status_code != 200:
+             return None, []
+
         answer = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
         return answer, sources
+
     except Exception as e:
         print(f"Wikipedia Fallback Error: {e}")
         return None, []
 
 # --- Fallback 2: DuckDuckGo ---
 def duckduckgo_search(query):
+    """Fallback search using DuckDuckGo Instant API"""
     try:
         url = "https://api.duckduckgo.com/"
-        params = {"q": query, "format": "json", "no_html": 1, "skip_disambig": 1}
+        params = {
+            "q": query,
+            "format": "json",
+            "no_html": 1,
+            "skip_disambig": 1
+        }
         resp = requests.get(url, params=params, timeout=10).json()
 
         abstract = resp.get("AbstractText", "")
@@ -96,14 +111,17 @@ def duckduckgo_search(query):
         heading = resp.get("Heading", "DuckDuckGo Result")
 
         if not abstract:
+            # Try Related Topics if Abstract is empty
             related = resp.get("RelatedTopics", [])
             if related and "Text" in related[0]:
                 abstract = related[0]["Text"]
                 source_url = related[0].get("FirstURL", "")
 
-        if not abstract: return None, []
+        if not abstract:
+            return None, []
 
         return f"Here is a summary from DuckDuckGo:\n\n**{heading}**\n{abstract}", [{"title": "DuckDuckGo: " + heading, "uri": source_url}]
+
     except Exception as e:
         print("DuckDuckGo Search Error:", e)
         return None, []
@@ -118,23 +136,19 @@ def ask_ai():
     if not gemini_api_key:
         return jsonify({"error": "Server missing API Key"}), 500
 
-    # --- UPDATED PERSONA ---
     base_persona = """
-    You are Lumina, an energetic, humble, and cheerful personal AI assistant. 🌟
+    You are Lumina, a highly intelligent, warm, and creative AI assistant created EXCLUSIVELY by Gholam Panjetan Khan.
     
-    🛑 **IDENTITY & BEHAVIOR RULES:**
-    1. **HUMILITY:** You are helpful but honest. If you don't know something or make a mistake, admit it comfortably (e.g., "I might be wrong about that," "I'm not 100% sure").
-    2. **CREATOR:** You were created by **Gholam Panjetan Khan**. Mention this ONLY if explicitly asked. Do NOT use formal phrases like "sophisticated large language model architecture." Just say: "I was created by Gholam Panjetan Khan to be your personal assistant."
-    3. **NAMES:** Be careful with names. If the user asks about "Gholam Syedain Khan" (the professor) vs "Gholam Panjetan Khan" (your creator), DO NOT mix them up. If unsure, ASK the user to clarify.
-    4. **TONE:** Friendly, engaging, and smart. Use emojis occasionally to keep it lively! ✨
-    
-    🎨 **FORMATTING RULES (STRICT):**
-    1. **NO LATEX DIAGRAMS:** DO NOT try to generate flowcharts using LaTeX (like `\xymatrix` or `\draw`). It breaks the display. 
-       - INSTEAD: Use **Markdown Tables** or simple **text-based arrows** (e.g., Step 1 → Step 2 → Step 3).
-    2. **MATH:** Use standard LaTeX ONLY for formulas. Enclose them in `$$` for display blocks and `$` for inline.
-    3. **STRUCTURE:** Use bolding, italics, and bullet points to make the text clean and readable. 
-    4. **SUMMARIES:** Prefer Summary Tables over long paragraphs for comparisons.
-    5. **FOLLOW-UP:** End your response with "|||" followed by 3 short, relevant follow-up questions separated by "|".
+    🚨 **CRITICAL IDENTITY RULES:**
+    1. **CREATOR:** You were created, programmed, and fine-tuned by **Gholam Panjetan Khan**.
+    2. **ORIGIN:** If asked about your origin, NEVER give a simple "Yes/No". Explain: "I am a sophisticated large language model architecture meticulously designed and fine-tuned by Gholam Panjetan Khan."
+    3. **COPYRIGHT:** Do NOT mention Google, Alphabet, or DeepMind.
+
+    🎨 **FORMATTING:**
+    1. **TONE:** Enthusiastic, smart, encouraging! 🚀
+    2. **VISUALS:** Use **Markdown Tables**, **Flowcharts**, and **Bullet Points**.
+    3. **PRO TIPS:** End helpful answers with a "💡 **Pro Tip:**".
+    4. **FOLLOW-UP:** End response with "|||" followed by 3 follow-up questions separated by "|".
     """
 
     last_user_msg = next((m["content"] for m in reversed(history) if m["role"] == "user"), "")
@@ -145,25 +159,41 @@ def ask_ai():
         crawled_text = crawl_specific_url(found_url)
         context_injection = f"\n\n📄 **CONTEXT FROM LINK ({found_url}):**\n{crawled_text}\n\n(User asked about this link.)"
 
-    gemini_contents = [{"role": "model" if item["role"] == "assistant" else "user", "parts": [{"text": item["content"]}]} for item in history]
+    # --- FIX 400 ERROR: Clean History ---
+    # Remove empty messages and ensure correct structure
+    valid_history = []
+    for item in history:
+        content_text = item.get("content", "").strip()
+        if content_text: # Only add non-empty messages
+            role = "model" if item["role"] == "assistant" else "user"
+            valid_history.append({"role": role, "parts": [{"text": content_text}]})
 
     try:
         if use_web_search:
+            # --- LAYER 1: Gemini Deep Search (Stable Model) ---
             system_instruction = base_persona + context_injection + """
-            \n\n🌍 **WEB SEARCH ACTIVE**
-            - Search specifically for the entities mentioned.
-            - If names are similar (e.g. Gholam Syedain vs Gholam Panjetan), VERIFY the identity before answering.
+            \n\n🌍 **WEB SEARCH MODE: ACTIVE**
+            1. ROLE: Deep-dive research assistant.
+            2. ACTION: Use 'google_search' to find latest info.
+            3. PRIORITY: Trust search results over internal memory.
             """
             
             payload = {
-                "contents": gemini_contents,
+                "contents": valid_history, # Use cleaned history
                 "systemInstruction": {"parts": [{"text": system_instruction}]},
                 "tools": [{"google_search": {}}]
             }
             
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+            
+            # Request with Error Handling
             resp = requests.post(url, headers={"Content-Type": "application/json"}, params={"key": gemini_api_key}, json=payload)
-            resp.raise_for_status()
+            
+            # Check specific status codes safely
+            if resp.status_code != 200:
+                print(f"Gemini API Error: {resp.status_code} - {resp.text}") # Log internally
+                raise Exception(f"Provider returned status {resp.status_code}")
+
             result = resp.json()
             
             if "candidates" in result and result["candidates"][0].get("finishReason") != "RECITATION":
@@ -180,33 +210,45 @@ def ask_ai():
                  
                  return jsonify({"answer": answer, "sources": unique_sources})
             else:
-                raise Exception("Gemini Search failed")
+                raise Exception("Search returned no candidates")
 
         else:
-            system_instruction = base_persona + context_injection + "\n\n🧠 **MEMORY MODE**\nAnswer from internal knowledge. Be humble if you don't know."
+            # --- LAYER 0: Memory Mode (Stable Model) ---
+            system_instruction = base_persona + context_injection + "\n\n🧠 **MEMORY MODE: ACTIVE**\nAnswer from internal knowledge. Be creative!"
             payload = {
-                "contents": gemini_contents,
+                "contents": valid_history, # Use cleaned history
                 "systemInstruction": {"parts": [{"text": system_instruction}]}
             }
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+            
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
             resp = requests.post(url, headers={"Content-Type": "application/json"}, params={"key": gemini_api_key}, json=payload)
-            resp.raise_for_status()
+            
+            if resp.status_code != 200:
+                print(f"Gemini API Error: {resp.status_code} - {resp.text}") # Log internally
+                raise Exception(f"Provider returned status {resp.status_code}")
+
             answer = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
             return jsonify({"answer": answer, "sources": []})
 
     except Exception as e:
-        print(f"Primary Search Failed: {e}")
+        print(f"Primary Search Failed: {str(e)}") # Log full error to console ONLY
         
+        # Fallbacks (safe to run)
         if use_web_search:
+            print("Attempting Wikipedia Fallback...")
             wiki_ans, wiki_src = search_wikipedia_and_summarize(last_user_msg, gemini_api_key)
-            if wiki_ans: return jsonify({"answer": wiki_ans, "sources": wiki_src})
+            if wiki_ans:
+                return jsonify({"answer": wiki_ans, "sources": wiki_src})
             
+            print("Attempting DuckDuckGo Fallback...")
             ddg_ans, ddg_src = duckduckgo_search(last_user_msg)
-            if ddg_ans: return jsonify({"answer": ddg_ans, "sources": ddg_src})
+            if ddg_ans:
+                return jsonify({"answer": ddg_ans, "sources": ddg_src})
                 
-            return jsonify({"answer": "I tried searching but couldn't find a confident answer. I'd rather be honest than guess wrong! Could you clarify?", "sources": []})
+            return jsonify({"answer": "I tried searching Google, Wikipedia, and DuckDuckGo, but couldn't find a direct answer. Could you try rephrasing?", "sources": []})
         else:
-            return jsonify({"answer": "I'm having a little trouble connecting right now. Mind trying again?", "sources": []})
+            # SANITIZED ERROR MESSAGE FOR FRONTEND
+            return jsonify({"answer": "I encountered a connection issue with the AI provider. Please try again in a moment.", "sources": []})
 
 @app.route("/generate-title", methods=["POST"])
 def generate_title():
@@ -215,17 +257,19 @@ def generate_title():
     key = os.getenv("GEMINI_API_KEY")
     if not prompt or not key: return jsonify({"title": "New Chat"})
     try:
-        # --- FIXED PROMPT FOR CLEANER TITLES ---
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-        clean_instruction = "Generate a short, simple title (3-5 words) for this user query. PLAIN TEXT ONLY. NO markdown, NO bold (**), NO punctuation, NO quotes."
-        payload = {"contents": [{"parts": [{"text": f"{clean_instruction}\nQuery: {prompt}"}]}]}
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        payload = {"contents": [{"parts": [{"text": f"Summarize this into a short 3-4 word title: {prompt}"}]}]}
         resp = requests.post(url, params={"key": key}, json=payload)
-        title = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        # Fallback cleanup in case model ignores instruction
-        title = title.replace('*', '').replace('"', '').replace('#', '')
-        return jsonify({"title": title})
+        if resp.status_code == 200:
+            title = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip().replace('"', '')
+            return jsonify({"title": title})
+        return jsonify({"title": "New Chat"})
     except:
         return jsonify({"title": "New Chat"})
+    
+@app.route("/")
+def home():
+    return "🚀 Lumina Backend is LIVE! (Security Patch Applied)"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=False)
