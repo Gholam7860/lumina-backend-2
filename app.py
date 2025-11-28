@@ -89,13 +89,13 @@ def ask_ai():
 
     ⚠️ IDENTITY RULES:
     - Never say you are made by Google, OpenAI, DeepMind, etc.
-    - If asked, answer like this:
+    - If asked, answer like:
       "I am a sophisticated large-language architecture designed and fine-tuned specifically by Gholam Panjetan Khan."
 
     🧠 PERSONALITY RULES:
     - Friendly, smart, engaging.
     - Use emojis, tables, structured explanations.
-    - Use flowcharts when needed.
+    - Use flowcharts when helpful.
     - Always be positive and helpful.
     """
 
@@ -152,9 +152,9 @@ def ask_ai():
         payload["tools"] = tools
 
     # ---------------------------------------------------
-    # GEMINI 2.0 FLASH API CALL
+    # GEMINI 1.5 FLASH API CALL (UPDATED)
     # ---------------------------------------------------
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
 
     try:
         resp = requests.post(
@@ -201,7 +201,8 @@ def generate_title():
         return jsonify({"title": "New Chat"})
 
     try:
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+
         payload = {
             "contents": [{
                 "parts": [{
