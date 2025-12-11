@@ -152,9 +152,10 @@ def ask_ai():
         payload["tools"] = tools
 
     # ---------------------------------------------------
-    # GEMINI 1.5 FLASH API CALL (UPDATED)
+    # GEMINI 2.0 FLASH API CALL
     # ---------------------------------------------------
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+    # Updated to gemini-2.0-flash
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
     try:
         resp = requests.post(
@@ -201,7 +202,8 @@ def generate_title():
         return jsonify({"title": "New Chat"})
 
     try:
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+        # Updated to gemini-2.0-flash
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
         payload = {
             "contents": [{
