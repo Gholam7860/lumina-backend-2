@@ -62,7 +62,7 @@ def crawl_specific_url(url):
 # -------------------------------------------------------
 def extract_url(text):
     match = re.search(
-        r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+',
+        r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-f_A-F][0-9a-f_A-F]))+',
         text
     )
     return match.group(0) if match else None
@@ -152,10 +152,10 @@ def ask_ai():
         payload["tools"] = tools
 
     # ---------------------------------------------------
-    # GEMINI 2.0 FLASH API CALL
+    # GEMINI 2.5 FLASH API CALL
     # ---------------------------------------------------
-    # Updated to gemini-2.0-flash
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    # Updated to gemini-2.5-flash
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
     try:
         resp = requests.post(
@@ -202,8 +202,8 @@ def generate_title():
         return jsonify({"title": "New Chat"})
 
     try:
-        # Updated to gemini-2.0-flash
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        # Updated to gemini-2.5-flash
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
         payload = {
             "contents": [{
